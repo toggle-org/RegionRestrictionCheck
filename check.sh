@@ -5003,7 +5003,6 @@ function MediaUnlockTest_AMCPlus() {
 }
 
 function echo_result() {
-    local i
     if [ "$JSON_OUTPUT" -eq 1 ]; then
         for ((i = 0; i < ${#array[@]}; i++)); do
             local label="${array[i]}"
@@ -5011,20 +5010,43 @@ function echo_result() {
             if [ -n "$line" ]; then
                 local status
                 local region
-                if echo "$line" | grep -q "Yes"; then
+                # Strip ANSI escapes for matching
+                local clean=$(echo "$line" | sed 's/\x1B\[[0-9;]*m//g')
+                # Prefer color-based status if present
+                if printf '%s' "$line" | grep -q $'\033\[32m'; then
                     status="\"Yes\""
-                elif echo "$line" | grep -qi "Oversea Only\|Soon\|CAPTCHA Free\|Hidden by a VPN"; then
+                elif printf '%s' "$line" | grep -q $'\033\[33m'; then
                     status="\"Partial\""
-                elif echo "$line" | grep -q "No"; then
-                    status="\"No\""
-                elif echo "$line" | grep -q "Failed"; then
-                    status="\"Failed\""
+                elif printf '%s' "$line" | grep -q $'\033\[31m'; then
+                    if echo "$clean" | grep -q "Failed"; then
+                        status="\"Failed\""
+                    elif echo "$clean" | grep -q "No"; then
+                        status="\"No\""
+                    else
+                        status="\"No\""
+                    fi
                 else
-                    status="\"Unknown\""
+                    if echo "$clean" | grep -q "Yes"; then
+                        status="\"Yes\""
+                    elif echo "$clean" | grep -qi "Oversea Only\|Soon\|CAPTCHA Free\|Hidden by a VPN"; then
+                        status="\"Partial\""
+                    elif echo "$clean" | grep -q "No"; then
+                        status="\"No\""
+                    elif echo "$clean" | grep -q "Failed"; then
+                        status="\"Failed\""
+                    else
+                        status="\"Unknown\""
+                    fi
                 fi
-                region=$(echo "$line" | sed -n 's/.*Region: \([^)]*\)).*/\1/p')
-                [ -z "$region" ] && region=""
-                JSON_RESULTS+=$(printf '{"label":"%s","status":%s,"region":"%s"},' "${label%:}" "$status" "$region")
+                region=$(echo "$clean" | sed -n 's/.*Region: \([^)]*\)).*/\1/p')
+                if [ -z "$region" ]; then
+                    region=$(echo "$clean" | sed -E 's/^.*:\s*(.*)$/\1/')
+                fi
+                region=$(printf "%s" "$region" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g' | tr -s ' ')
+                if echo "$region" | grep -Eq '^(Yes|No|Failed|Partial|Unknown|Info)$'; then
+                    region=""
+                fi
+                JSON_RESULTS+=$(printf '{"label":"%s","status":%s,"region":"%s"},' "${label%:}" $(echo $status) "$region")
             else
                 JSON_RESULTS+=$(printf '{"label":"%s","status":"Unknown","region":""},' "${label%:}")
             fi
@@ -5071,9 +5093,19 @@ function Global_UnlockTest() {
     local array=("Bing Region:" "Apple Region:" "YouTube CDN:" "Netflix Preferred CDN:" "ChatGPT:" "Google Gemini:" "Claude:" "Wikipedia Editability:" "Google Play Store:" "Google Search CAPTCHA Free:" "Steam Currency:")
     echo_result ${result} ${array}
     show_region Forum
-    WebTest_Reddit
+    local result=$(
+        WebTest_Reddit &
+    )
+    wait
+    local array=("Reddit:")
+    echo_result ${result} ${array}
     show_region Game
-    GameTest_SDGGGE
+    local result=$(
+        GameTest_SDGGGE &
+    )
+    wait
+    local array=("SD Gundam G Generation Eternal:")
+    echo_result ${result} ${array}
     echo "======================================="
 }
 
