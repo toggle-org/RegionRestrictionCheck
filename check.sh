@@ -493,9 +493,15 @@ count_run_times() {
 }
 
 download_extra_data() {
-    MEDIA_COOKIE=$(curl ${CURL_OPTS} -s "https://raw.githubusercontent.com/lmc999/RegionRestrictionCheck/main/cookies")
-    IATACODE=$(curl ${CURL_OPTS} -s "https://raw.githubusercontent.com/lmc999/RegionRestrictionCheck/main/reference/IATACode.txt")
-    IATACODE2=$(curl ${CURL_OPTS} -s "https://raw.githubusercontent.com/lmc999/RegionRestrictionCheck/main/reference/IATACode2.txt")
+    if [ -f ./cookies ] && [ -f ./reference/IATACode.txt ] && [ -f ./reference/IATACode2.txt ]; then
+        MEDIA_COOKIE=$(cat ./cookies)
+        IATACODE=$(cat ./reference/IATACode.txt)
+        IATACODE2=$(cat ./reference/IATACode2.txt)
+    else
+        MEDIA_COOKIE=$(curl ${CURL_OPTS} -s "https://raw.githubusercontent.com/lmc999/RegionRestrictionCheck/main/cookies")
+        IATACODE=$(curl ${CURL_OPTS} -s "https://raw.githubusercontent.com/lmc999/RegionRestrictionCheck/main/reference/IATACode.txt")
+        IATACODE2=$(curl ${CURL_OPTS} -s "https://raw.githubusercontent.com/lmc999/RegionRestrictionCheck/main/reference/IATACode2.txt")
+    fi
     if [ -z "$MEDIA_COOKIE" ] || [ -z "$IATACODE" ] || [ -z "$IATACODE2" ]; then
         echo -e "${Font_Red}Extra data download failed.${Font_Suffix}"
         delay 3
@@ -2024,7 +2030,7 @@ function MediaUnlockTest_HotStar() {
         return
     fi
     if [ "$region" == 'US' ]; then
-        echo -n -e "\r HotStar:\t\t\t\t${Font_Yellow}No (Discontinued in the US)${Font_Suffix}\n"
+        echo -n -e "\r HotStar:\t\t\t\t${Font_Red}No (Discontinued in the US)${Font_Suffix}\n"
         return
     fi
     if [ "$region" == "$siteRegion" ]; then
@@ -2090,7 +2096,7 @@ function MediaUnlockTest_FuboTV() {
         return
     fi
     if [ -n "$isAllowed" ]; then
-        echo -n -e "\r Fubo TV:\t\t\t\t${Font_Green}Yes (Region:${countryCode})${Font_Suffix}\n"
+        echo -n -e "\r Fubo TV:\t\t\t\t${Font_Green}Yes (Region: ${countryCode})${Font_Suffix}\n"
         return
     fi
 
@@ -3690,14 +3696,25 @@ function MediaUnlockTest_musicjp() {
 
 function MediaUnlockTest_InstagramMusic() {
     ARCH=$(uname -m)
+    local BINARY_NAME
 
     if [ "$ARCH" = "x86_64" ]; then
-        curl -sL -o ./ins https://github.com/lmc999/RegionRestrictionCheck/raw/refs/heads/main/binary/ins_amd64
+        BINARY_NAME=ins_amd64
+        if [ -f ./binary/$BINARY_NAME ]; then
+            mv ./binary/$BINARY_NAME ./ins
+        else
+            curl -sL -o ./ins https://github.com/lmc999/RegionRestrictionCheck/raw/refs/heads/main/binary/$BINARY_NAME
+        fi
         chmod +x ./ins
         clear
         ./ins
     elif [ "$ARCH" = "aarch64" ]; then
-        curl -sL -o ./ins https://github.com/lmc999/RegionRestrictionCheck/raw/refs/heads/main/binary/ins_arm64
+        BINARY_NAME=ins_arm64
+        if [ -f ./binary/$BINARY_NAME ]; then
+            mv ./binary/$BINARY_NAME ./ins
+        else
+            curl -sL -o ./ins https://github.com/lmc999/RegionRestrictionCheck/raw/refs/heads/main/binary/$BINARY_NAME
+        fi
         chmod +x ./ins
         clear
         ./ins
@@ -5006,30 +5023,29 @@ function echo_result() {
     if [ "$JSON_OUTPUT" -eq 1 ]; then
         for ((i = 0; i < ${#array[@]}; i++)); do
             local label="${array[i]}"
-            local line=$(echo "$result" | grep "$label" | head -n 1)
+            local line
+            line=$(echo "$result" | grep "$label" | head -n 1)
+
             if [ -n "$line" ]; then
                 local status
-                local region
-                # Strip ANSI escapes for matching
-                local clean=$(echo "$line" | sed 's/\x1B\[[0-9;]*m//g')
-                # Prefer color-based status if present
-                if printf '%s' "$line" | grep -q $'\033\[32m'; then
+                local region=""
+                local clean
+
+                clean=$(echo "$line" | sed 's/\x1B\[[0-9;]*m//g')
+
+                if printf '%s' "$line" | grep -F -q "$(printf '%b' "$Font_Green")"; then
                     status="\"Yes\""
-                elif printf '%s' "$line" | grep -q $'\033\[33m'; then
+                elif printf '%s' "$line" | grep -F -q "$(printf '%b' "$Font_Yellow")"; then
                     status="\"Partial\""
-                elif printf '%s' "$line" | grep -q $'\033\[31m'; then
+                elif printf '%s' "$line" | grep -F -q "$(printf '%b' "$Font_Red")"; then
                     if echo "$clean" | grep -q "Failed"; then
                         status="\"Failed\""
-                    elif echo "$clean" | grep -q "No"; then
-                        status="\"No\""
                     else
                         status="\"No\""
                     fi
                 else
                     if echo "$clean" | grep -q "Yes"; then
                         status="\"Yes\""
-                    elif echo "$clean" | grep -qi "Oversea Only\|Soon\|CAPTCHA Free\|Hidden by a VPN"; then
-                        status="\"Partial\""
                     elif echo "$clean" | grep -q "No"; then
                         status="\"No\""
                     elif echo "$clean" | grep -q "Failed"; then
@@ -5038,15 +5054,15 @@ function echo_result() {
                         status="\"Unknown\""
                     fi
                 fi
-                region=$(echo "$clean" | sed -n 's/.*Region: \([^)]*\)).*/\1/p')
-                if [ -z "$region" ]; then
-                    region=$(echo "$clean" | sed -E 's/^.*:\s*(.*)$/\1/')
-                fi
-                region=$(printf "%s" "$region" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g' | tr -s ' ')
+
+                region=$(echo "$clean" | sed -n 's/.*Region: *\([^)]*\).*/\1/p')
+
+                region=$(printf "%s" "$region" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g' | tr -d '\t' | tr -s ' ')
                 if echo "$region" | grep -Eq '^(Yes|No|Failed|Partial|Unknown|Info)$'; then
                     region=""
                 fi
-                JSON_RESULTS+=$(printf '{"label":"%s","status":%s,"region":"%s"},' "${label%:}" $(echo $status) "$region")
+
+                JSON_RESULTS+=$(printf '{"label":"%s","status":%s,"region":"%s"},' "${label%:}" "$status" "$region")
             else
                 JSON_RESULTS+=$(printf '{"label":"%s","status":"Unknown","region":""},' "${label%:}")
             fi
